@@ -1,0 +1,114 @@
+# glpsol --math --model TeamFormation.mathprog --wlp Output/TeamFormation.cplex --output Output/TeamFormation.out  --log Output/TeamFormation.log --data Data/20141-tuesday.data --mipgap 0.05
+
+# ---------- CONSTANT CONTROL VARIABLES ----------
+
+# TYPES is the maximum number of 0/1 "bins" from a psychometric.  Having a single constant number makes the
+#       model easier to adjust even though there will likely be psychometrics that have less bins which
+#       will lead to a lot of zeros.  I don't THINK that the mass amounts of zeros will have problems.
+
+set TYPES := 1..16;
+
+param TEAM_SIZE 		:=  4 integer;
+
+# 20 takes  45 seconds
+# 15 takes 120 seconds
+# 13 takes 180 seconds ... Wednesday can only make 5.6% 
+param ESC101_PROXIMITY	:= 15 integer; # out of  100
+
+param LEARNING_DIVERSITY_WEIGHT		:= 100 integer;
+param LEADERSHIP_DIVERSITY_WEIGHT	:= 100 integer;
+param LANGUAGE_DIVERSITY_WEIGHT		:= 100 integer;
+
+# ---------- EXTERNAL DATA ----------
+
+set STUDENTS;
+param learn{STUDENTS, TYPES};
+param lead{STUDENTS, TYPES};
+param lang{STUDENTS, TYPES};
+param grit_score{STUDENTS, TYPES};
+param esc101_individual_pct{STUDENTS, TYPES};
+
+# ---------- CALCULATED CONTROL VARIABLES ----------
+
+set TEAMS := 1..( ceil( (card(STUDENTS)/TEAM_SIZE) ) );	# j -- number of teams
+
+# ---------- OPTMIZATION VARIABLES ----------
+
+var student_on_team{STUDENTS, TEAMS} binary;	# student_on_team[i][j] = 1 if student i is assigned to team j
+var team_type_learning{TEAMS, TYPES} binary; 	# 1 if type k of LEARNING is on team j
+var team_type_leadership{TEAMS, TYPES} binary;	# 1 if type k of LEADERSHIP is on team j
+var team_type_language{TEAMS, TYPES} binary;	# 1 if type k of LANGUAGE is on team j
+
+# ---------- OBJECTIVE ----------
+
+maximize diversity: sum{j in TEAMS, k in TYPES} ( 
+	   ( LEARNING_DIVERSITY_WEIGHT * team_type_learning[j,k] )
+	 + ( LEADERSHIP_DIVERSITY_WEIGHT * team_type_leadership[j,k] )
+	 + ( LANGUAGE_DIVERSITY_WEIGHT * team_type_language[j,k] ) 
+);  
+
+# ---------- CONSTRAINTS ----------
+
+# -- Logistical Constraints
+
+subject to student_assignment {i in STUDENTS}: sum{j in TEAMS} student_on_team[i,j] = 1; # each student in exactly one team
+subject to team_size_lower {j in TEAMS}: sum{i in STUDENTS} student_on_team[i,j] >= (TEAM_SIZE - 1);
+subject to team_size_upper {j in TEAMS}: sum{i in STUDENTS} student_on_team[i,j] <= (TEAM_SIZE);
+
+# -- Diversity Constraints
+
+subject to learning_diversity {j in TEAMS, k in TYPES}: team_type_learning[j,k] <= sum{i in STUDENTS} student_on_team[i,j]*learn[i,k];
+subject to leading_diversity  {j in TEAMS, k in TYPES}: team_type_leadership[j,k]  <= sum{i in STUDENTS} student_on_team[i,j]*lead[i,k];
+subject to language_diversity {j in TEAMS, k in TYPES}: team_type_language[j,k]  <= sum{i in STUDENTS} student_on_team[i,j]*lang[i,k];
+subject to no_dominant_language {j in TEAMS, k in TYPES}: sum{i in STUDENTS} student_on_team[i,j]*lang[i,k] <= 2 ;
+
+# -- ESC101 constraints
+
+# The distance between two individual ESC101 grades has to be proximal
+
+subject to midterm_range { j in TEAMS, i in STUDENTS, k in STUDENTS: ( abs( ( esc101_individual_pct[i,1] - esc101_individual_pct[k,1] ) ) >= ESC101_PROXIMITY ) }: student_on_team[i,j] + student_on_team[k,j] <= 1;
+
+# ---------- SOLUTION ----------
+
+solve;
+
+# ---------- OUTPUT ----------
+
+printf { j in TEAMS, i in STUDENTS: student_on_team[i,j] = 1 } "%02d %s\n", j, i > "Optimizer Output/Teams.txt";
+table result { j in TEAMS, i in STUDENTS: student_on_team[i,j] = 1 } OUT "CSV" "Optimizer Output/Teams.csv": j~TEAM, i~STUDENT;
+
+# Diagnostic outputs
+
+printf "Team\t#\tHP\tBB\tLang\n" > "Optimizer Output/Diagnostics.out";
+printf {j in TEAMS}: "%02d\t--\t%d\t%d\t%d\t%d\n"
+	,j
+	,sum{i in STUDENTS} student_on_team[i,j]
+	,sum{k in TYPES} team_type_learning[j,k]
+	,sum{k in TYPES} team_type_leadership[j,k]
+	,sum{k in TYPES} team_type_language[j,k] 
+	>> "Optimizer Output/Diagnostics.out";
+
+printf "" > "Optimizer Output/TeamsCompressed.txt";
+for { j in TEAMS }
+{  
+	printf "%02d --", j >> "Optimizer Output/TeamsCompressed.txt";
+	for { i in STUDENTS: student_on_team[i,j] = 1 }
+	{
+		printf " %s", i >> "Optimizer Output/TeamsCompressed.txt";
+	}
+	printf "\n" >> "Optimizer Output/TeamsCompressed.txt";
+}
+
+printf "" > "Optimizer Output/LanguagesCompressed.txt";
+for { j in TEAMS }
+{  
+	printf "%02d --", j >> "Optimizer Output/LanguagesCompressed.txt";
+	for { k in TYPES }
+	{
+		printf " %0d", sum{ i in STUDENTS: student_on_team[i,j] = 1 } lang[i,k] >> "Optimizer Output/LanguagesCompressed.txt";
+	}
+	printf "\n" >> "Optimizer Output/LanguagesCompressed.txt";
+}
+
+end;
+
