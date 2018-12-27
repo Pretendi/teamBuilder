@@ -65,11 +65,11 @@ class Task(object):
         flag = True
         if not soft_on_number and (len(group) > 4 or len(group) < 3):
             flag = False
-            # print(
-            #     "group {} has invalid number of people: {}".format(
-            #         tuple(group), len(group)
-            #     )
-            # )
+            print(
+                "group {} has invalid number of people: {}".format(
+                    tuple(group), len(group)
+                )
+            )
         if self.check_any_dislike(*group):
             flag = False
         return flag
@@ -77,7 +77,7 @@ class Task(object):
     def check_constraints(self, assignment):
         flag = True
         for group in assignment:
-            if self.check_constraints_group(group):
+            if not self.check_constraints_group(group):
                 flag = False
         return flag
 
@@ -162,8 +162,10 @@ class BruteForceSolver(object):
         self.best_assignment = None
 
     def update(self, assignment):
+        print(assignment)
         if task.check_constraints(assignment):
             perf = task.get_total_score(assignment)
+            print("  success! - objective score: {:.3f}".format(perf))
             if self.max_perf is None or perf > self.max_perf:
                 self.max_perf = perf
                 self.best_assignment = assignment
@@ -173,10 +175,14 @@ class BruteForceSolver(object):
     ):
         if n_selected == task.n_students:
             group_ids = np.zeros(task.n_students, dtype=np.int64)
-            for group_id, group in enumerate(groups):
+            if len(groups[-1]) == 0:
+                groups_new = groups[:-1]
+            else:
+                groups_new = groups
+            for group_id, group in enumerate(groups_new):
                 for student_id in group:
                     group_ids[student_id] = group_id
-            self.update(Assignment(group_ids, len(groups)))
+            self.update(Assignment(group_ids, len(groups_new)))
             return
         for index in range(len(considering_students)):
             curr_group.append(considering_students[index])
@@ -228,9 +234,12 @@ def random_assignment(task):
     return Assignment(group_ids, n_groups)
 
 
+limit = 12
+
+
 def parse_feature(df):
     return {
-        "value": np.array(df.values, dtype=np.bool),
+        "value": np.array(df.values, dtype=np.bool)[:limit, :limit],
         "description": list(df.columns.values),
     }
 
@@ -276,9 +285,15 @@ dfs = {
 task = Task(**dfs)
 solver = BruteForceSolver(task)
 solver.go()
-assignment = random_assignment(task)
 
-print(assignment)
-print(task.check_constraints(assignment))
-print(task.get_total_score(assignment))
-task.print_features(assignment)
+print(
+    "best assignment: score={:.3f}".format(task.get_total_score(solver.best_assignment))
+)
+task.print_features(solver.best_assignment)
+
+# assignment = random_assignment(task)
+
+# print(assignment)
+# print(task.check_constraints(assignment))
+# print(task.get_total_score(assignment))
+# task.print_features(assignment)
